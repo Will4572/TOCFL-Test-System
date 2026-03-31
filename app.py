@@ -289,7 +289,8 @@ def admin_page():
             if len(active_data) > 0:
                 monitor_list = []
                 for r in active_data:
-                    if len(r) > 1:
+                    # Kiểm tra và bỏ qua dòng tiêu đề (Header) của Sheet nếu có
+                    if len(r) > 1 and "學號" not in str(r[0]) and "ID" not in str(r[0]):
                         s_id = str(r[0])
                         s_info = next((sv for sv in sv_rows if str(sv[1]) == s_id), ["", s_id, "", "Unknown"])
                         try:
@@ -303,7 +304,12 @@ def admin_page():
                             "班級 (Class)": s_info[0], "學號 (ID)": s_id,
                             "姓名 (Name)": s_info[3], "進度 (Progress)": f"{answered} / {total_for_student} 題"
                         })
-                st.dataframe(pd.DataFrame(monitor_list), use_container_width=True)
+                
+                # Nếu danh sách có người, vẽ bảng. Nếu không có ai (chỉ có tiêu đề), báo trống.
+                if len(monitor_list) > 0:
+                    st.dataframe(pd.DataFrame(monitor_list), use_container_width=True)
+                else:
+                    st.info("目前沒有學生 (No students currently taking the exam).")
             else: st.info("目前沒有學生 (No students currently taking the exam).")
             if st.button("🔄 刷新 (Refresh)", use_container_width=True): st.rerun()
         except: st.info("No data yet.")
@@ -530,6 +536,9 @@ if st.session_state.page == "Login":
                                 all_q = fetch_sheet_data("題庫")[1:]
                                 num_q = int(conf[5])
                                 st.session_state.exam_data = random.sample(all_q, min(num_q, len(all_q)))
+                            
+                            # Cập nhật danh sách "Đang thi" ngay khi vừa đăng nhập thành công
+                            auto_sync_progress()
                                 
                             time.sleep(1)
                             st.session_state.page = "Exam"
@@ -539,11 +548,22 @@ if st.session_state.page == "Login":
 
         st.markdown("<br><br>", unsafe_allow_html=True)
         with st.expander("🔐 系統管理員 (Admin Login)"):
-            pw = st.text_input("密碼 (Password)", type="password")
-            conf = get_exam_config()
-            if len(conf) > 1 and pw == str(conf[3]):
+            # max_chars=10 giúp khóa ô nhập liệu, không cho gõ quá 10 ký tự
+            pw = st.text_input("密碼 (Password)", type="password", max_chars=10)
+            
+            # Kiểm tra: Chỉ khi nào nhập ĐỦ 10 ký tự mới hiển thị nút bấm
+            if len(pw) == 10:
                 if st.button("進入後台 (Enter Dashboard)", use_container_width=True): 
-                    st.session_state.page = "Admin"; st.rerun()
+                    conf = get_exam_config()
+                    # Khi bấm nút mới bắt đầu kiểm tra mật khẩu với Google Sheet
+                    if len(conf) > 1 and pw == str(conf[3]):
+                        st.session_state.page = "Admin"
+                        st.rerun()
+                    else:
+                        st.error("❌ 密碼錯誤 (Sai mật khẩu, vui lòng thử lại!)")
+            elif len(pw) > 0:
+                # Báo hiệu cho admin biết họ đã nhập bao nhiêu số
+                st.info(f"Đang nhập... ({len(pw)}/10)")
 
 elif st.session_state.page == "Result":
     st.balloons()
