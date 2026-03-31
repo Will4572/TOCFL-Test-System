@@ -228,13 +228,11 @@ if 'page' not in st.session_state: st.session_state.page = "Login"
 if 'answers' not in st.session_state: st.session_state.answers = {}
 if 'current_q' not in st.session_state: st.session_state.current_q = 0
 
-# --- HÀM ĐỒNG BỘ ĐÃ ĐƯỢC NÂNG CẤP ("TỰ CHỮA LÀNH") ---
 def auto_sync_progress():
     try:
         if 'student_info' not in st.session_state or 'exam_data' not in st.session_state: return
         st_id = str(st.session_state.student_info['ID']).strip()
         
-        # Tự động tạo trang tính "正在考試" nếu nó bị xóa mất hoặc không tồn tại
         try:
             ws = sheet.worksheet("正在考試")
         except:
@@ -252,7 +250,6 @@ def auto_sync_progress():
         state_json = json.dumps(state_data)
         
         if found_row != -1: 
-            # Dùng update_cell (hàng, cột, giá trị) - Cú pháp này KHÔNG BAO GIỜ bị lỗi phiên bản
             ws.update_cell(found_row, 2, state_json)
         else: 
             ws.append_row([st_id, state_json])
@@ -287,7 +284,6 @@ def admin_page():
         
         if st.button("💾 儲存設定 (Save)", use_container_width=True):
             allowed_str = ",".join(allowed_classes)
-            # Dùng update_cell để đảm bảo lưu cài đặt không bị lỗi
             try:
                 sheet.worksheet("設定").update('A2:F2', [[status, time_limit, week, conf[3], allowed_str, num_q]])
             except:
@@ -345,15 +341,26 @@ def admin_page():
             df_week = df[df.iloc[:, 1] == f"第 {conf[2]} 週"] 
             
             if not df_week.empty:
-                scores = pd.to_numeric(df_week.iloc[:, 7], errors='coerce').dropna()
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("已考次數 (Total Exams)", f"{len(scores)}")
-                c2.metric("平均分 (Average)", f"{scores.mean():.1f}")
-                c3.metric("最高分 (Highest)", f"{scores.max()}")
-                c4.metric("最低分 (Lowest)", f"{scores.min()}")
+                # TỰ ĐỘNG TÌM ĐÚNG CỘT CHỨA ĐIỂM SỐ
+                score_col_idx = 7 # Mặc định là cột thứ 8
+                for idx, col_name in enumerate(df.columns):
+                    if '分' in str(col_name) or 'score' in str(col_name).lower():
+                        score_col_idx = idx
+                        break
                 
-                csv_data = df_week.to_csv(index=False).encode('utf-8-sig')
-                st.download_button(label="📥 下載成績單 (Download CSV)", data=csv_data, file_name=f"TOCFL_Results_Week_{conf[2]}.csv", mime="text/csv")
+                scores = pd.to_numeric(df_week.iloc[:, score_col_idx], errors='coerce').dropna()
+                
+                if not scores.empty:
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("已考次數 (Total Exams)", f"{len(scores)}")
+                    c2.metric("平均分 (Average)", f"{scores.mean():.1f}")
+                    c3.metric("最高分 (Highest)", f"{scores.max()}")
+                    c4.metric("最低分 (Lowest)", f"{scores.min()}")
+                    
+                    csv_data = df_week.to_csv(index=False).encode('utf-8-sig')
+                    st.download_button(label="📥 下載成績單 (Download CSV)", data=csv_data, file_name=f"TOCFL_Results_Week_{conf[2]}.csv", mime="text/csv")
+                else:
+                    st.info("本週的數據沒有有效分數 (No valid scores found for this week).")
             else: 
                 st.info("本週尚無成績 (No results for this week yet).")
         else:
