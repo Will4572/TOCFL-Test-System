@@ -239,14 +239,16 @@ def auto_sync_progress():
         
         found_row = -1
         for i, r in enumerate(data):
-            if r and r[0] == str(st_id):
+            if len(r) > 0 and r[0] == str(st_id):
                 found_row = i + 1; break
                 
         state_data = {"exam_data": st.session_state.exam_data, "answers": st.session_state.answers}
         state_json = json.dumps(state_data)
         
-        if found_row != -1: ws.update(f'B{found_row}', [[state_json]])
-        else: ws.append_row([st_id, state_json])
+        if found_row != -1: 
+            ws.update(values=[[state_json]], range_name=f'B{found_row}')
+        else: 
+            ws.append_row([st_id, state_json])
     except: pass
 
 # ==========================================
@@ -277,66 +279,74 @@ def admin_page():
         
         if st.button("💾 儲存設定 (Save)", use_container_width=True):
             allowed_str = ",".join(allowed_classes)
-            sheet.worksheet("設定").update('A2:F2', [[status, time_limit, week, conf[3], allowed_str, num_q]])
+            sheet.worksheet("設定").update(values=[[status, time_limit, week, conf[3], allowed_str, num_q]], range_name='A2:F2')
             st.cache_data.clear()
             st.success("✅ 設定已更新！(Settings Updated)")
             time.sleep(1); st.rerun()
 
+    # --- KHU VỰC ĐÃ ĐƯỢC VIẾT LẠI HOÀN TOÀN ĐỂ FIX LỖI "NO DATA YET" ---
     with tab2:
         st.markdown("<h3 style='margin-top:20px;'>正在考試學生 (Students in Progress)</h3>", unsafe_allow_html=True)
-        try:
-            active_data = fetch_dynamic_data("正在考試")
-            if len(active_data) > 0:
-                monitor_list = []
-                for r in active_data:
-                    # Kiểm tra và bỏ qua dòng tiêu đề (Header) của Sheet nếu có
-                    if len(r) > 1 and "學號" not in str(r[0]) and "ID" not in str(r[0]):
-                        s_id = str(r[0])
-                        s_info = next((sv for sv in sv_rows if str(sv[1]) == s_id), ["", s_id, "", "Unknown"])
-                        try:
-                            state_dict = json.loads(r[1])
-                            ans_dict = state_dict.get("answers", {})
-                            answered = len([v for v in ans_dict.values() if str(v).strip() not in ["None", ""]])
-                            total_for_student = len(state_dict.get("exam_data", []))
-                        except: 
-                            answered = 0; total_for_student = conf[5]
-                        monitor_list.append({
-                            "班級 (Class)": s_info[0], "學號 (ID)": s_id,
-                            "姓名 (Name)": s_info[3], "進度 (Progress)": f"{answered} / {total_for_student} 題"
-                        })
+        active_data = fetch_dynamic_data("正在考試")
+        
+        monitor_list = []
+        for r in active_data:
+            # Kiểm tra dữ liệu: Phải có ít nhất 1 cột và không phải là dòng tiêu đề (chứa chữ 學號 hoặc ID)
+            if len(r) > 0 and str(r[0]).strip() != "" and "學號" not in str(r[0]) and "ID" not in str(r[0]):
+                s_id = str(r[0])
+                s_info = next((sv for sv in sv_rows if str(sv[1]) == s_id), ["", s_id, "", "Unknown"])
                 
-                # Nếu danh sách có người, vẽ bảng. Nếu không có ai (chỉ có tiêu đề), báo trống.
-                if len(monitor_list) > 0:
-                    st.dataframe(pd.DataFrame(monitor_list), use_container_width=True)
-                else:
-                    st.info("目前沒有學生 (No students currently taking the exam).")
-            else: st.info("目前沒有學生 (No students currently taking the exam).")
-            if st.button("🔄 刷新 (Refresh)", use_container_width=True): st.rerun()
-        except: st.info("No data yet.")
+                answered = 0
+                total_for_student = int(conf[5])
+                
+                # Giải mã dữ liệu quá trình làm bài
+                if len(r) > 1 and str(r[1]).strip() != "":
+                    try:
+                        state_dict = json.loads(r[1])
+                        ans_dict = state_dict.get("answers", {})
+                        answered = len([v for v in ans_dict.values() if str(v).strip() not in ["None", ""]])
+                        total_for_student = len(state_dict.get("exam_data", []))
+                    except: pass
+                    
+                monitor_list.append({
+                    "班級 (Class)": s_info[0], "學號 (ID)": s_id,
+                    "姓名 (Name)": s_info[3], "進度 (Progress)": f"{answered} / {total_for_student} 題"
+                })
+        
+        if len(monitor_list) > 0:
+            st.dataframe(pd.DataFrame(monitor_list), use_container_width=True)
+        else:
+            st.info("目前沒有學生 (No students currently taking the exam).")
+            
+        if st.button("🔄 刷新 (Refresh)", use_container_width=True): 
+            st.rerun()
 
     with tab3:
         st.markdown(f"<h3 style='margin-top:20px;'>第 {conf[2]} 週成績統計 (Week {conf[2]} Statistics)</h3>", unsafe_allow_html=True)
-        try:
-            kq_rows = fetch_dynamic_data("考試結果")
-            if len(kq_rows) > 1:
-                df = pd.DataFrame(kq_rows[1:], columns=kq_rows[0])
-                df_week = df[df.iloc[:, 1] == f"第 {conf[2]} 週"] 
+        kq_rows = fetch_dynamic_data("考試結果")
+        if len(kq_rows) > 1:
+            df = pd.DataFrame(kq_rows[1:], columns=kq_rows[0])
+            df_week = df[df.iloc[:, 1] == f"第 {conf[2]} 週"] 
+            
+            if not df_week.empty:
+                scores = pd.to_numeric(df_week.iloc[:, 7], errors='coerce').dropna()
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("已考次數 (Total Exams)", f"{len(scores)}")
+                c2.metric("平均分 (Average)", f"{scores.mean():.1f}")
+                c3.metric("最高分 (Highest)", f"{scores.max()}")
+                c4.metric("最低分 (Lowest)", f"{scores.min()}")
                 
-                if not df_week.empty:
-                    scores = pd.to_numeric(df_week.iloc[:, 7], errors='coerce').dropna()
-                    c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("已考次數 (Total Exams)", f"{len(scores)}")
-                    c2.metric("平均分 (Average)", f"{scores.mean():.1f}")
-                    c3.metric("最高分 (Highest)", f"{scores.max()}")
-                    c4.metric("最低分 (Lowest)", f"{scores.min()}")
-                    
-                    csv_data = df_week.to_csv(index=False).encode('utf-8-sig')
-                    st.download_button(label="📥 下載成績單 (Download CSV)", data=csv_data, file_name=f"TOCFL_Results_Week_{conf[2]}.csv", mime="text/csv")
-                else: st.info("本週尚無成績 (No results for this week yet).")
-        except Exception as e: st.write("Cannot load statistics.")
+                csv_data = df_week.to_csv(index=False).encode('utf-8-sig')
+                st.download_button(label="📥 下載成績單 (Download CSV)", data=csv_data, file_name=f"TOCFL_Results_Week_{conf[2]}.csv", mime="text/csv")
+            else: 
+                st.info("本週尚無成績 (No results for this week yet).")
+        else:
+            st.info("系統尚未有任何考試成績 (System has no exam records yet).")
 
     st.markdown("---")
-    if st.button("登出 (Logout)", use_container_width=True): st.session_state.page = "Login"; st.rerun()
+    if st.button("登出 (Logout)", use_container_width=True): 
+        st.session_state.page = "Login"
+        st.rerun()
 
 # ==========================================
 # 4. EXAM PAGE
@@ -477,7 +487,10 @@ def finish_exam(sv, week):
     try:
         ws_temp = sheet.worksheet("正在考試")
         cell = ws_temp.find(str(sv['ID']))
-        ws_temp.delete_rows(cell.row)
+        try:
+            ws_temp.delete_rows(cell.row)
+        except:
+            ws_temp.delete_row(cell.row)
     except: pass
     
     st.session_state.final_score = score
@@ -522,7 +535,7 @@ if st.session_state.page == "Login":
                             is_resumed = False
                             temp_data = fetch_dynamic_data("正在考試")
                             for r in temp_data:
-                                if r and r[0] == str(sv['ID']):
+                                if r and len(r) > 0 and r[0] == str(sv['ID']):
                                     try:
                                         state_dict = json.loads(r[1])
                                         st.session_state.exam_data = state_dict.get("exam_data", [])
