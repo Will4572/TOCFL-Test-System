@@ -246,7 +246,8 @@ def auto_sync_progress():
         state_json = json.dumps(state_data)
         
         if found_row != -1: 
-            ws.update(values=[[state_json]], range_name=f'B{found_row}')
+            # Dùng cú pháp chuẩn cũ để tương thích với mọi bản gspread
+            ws.update(f'B{found_row}', [[state_json]])
         else: 
             ws.append_row([st_id, state_json])
     except: pass
@@ -279,12 +280,12 @@ def admin_page():
         
         if st.button("💾 儲存設定 (Save)", use_container_width=True):
             allowed_str = ",".join(allowed_classes)
-            sheet.worksheet("設定").update(values=[[status, time_limit, week, conf[3], allowed_str, num_q]], range_name='A2:F2')
+            # Khôi phục cú pháp chuẩn cũ
+            sheet.worksheet("設定").update('A2:F2', [[status, time_limit, week, conf[3], allowed_str, num_q]])
             st.cache_data.clear()
             st.success("✅ 設定已更新！(Settings Updated)")
             time.sleep(1); st.rerun()
 
-    # --- KHU VỰC ĐÃ ĐƯỢC VIẾT LẠI HOÀN TOÀN ĐỂ FIX LỖI "NO DATA YET" ---
     with tab2:
         st.markdown("<h3 style='margin-top:20px;'>正在考試學生 (Students in Progress)</h3>", unsafe_allow_html=True)
         active_data = fetch_dynamic_data("正在考試")
