@@ -91,18 +91,19 @@ st.markdown("""
     /* ========================================== */
     /* SỬA LỖI DROPDOWN MENU & MULTISELECT BỊ ĐEN */
     /* ========================================== */
-    div[role="listbox"] {
+    div[data-baseweb="popover"],
+    div[data-baseweb="popover"] > div,
+    ul[data-baseweb="menu"],
+    ul[role="listbox"] {
         background-color: #FFFFFF !important;
-        border: 2px solid #7DD3FC !important;
-        border-radius: 12px !important;
     }
-    div[role="listbox"] li[role="option"] {
+    li[role="option"] {
         background-color: #FFFFFF !important;
-        color: #0F172A !important;
+        color: #000000 !important;
         font-weight: 600 !important;
     }
-    div[role="listbox"] li[role="option"]:hover, 
-    div[role="listbox"] li[aria-selected="true"] {
+    li[role="option"]:hover, 
+    li[role="option"][aria-selected="true"] {
         background-color: #E0F2FE !important;
         color: #0284C7 !important;
     }
@@ -191,13 +192,13 @@ st.markdown("""
 def connect_sheets():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     
-    # KHI CHẠY TRÊN MẠNG: Dùng st.secrets
-    if "gcp_service_account" in st.secrets:
+    try:
+        # 1. Thử đọc file key.json khi bạn chạy dưới máy tính cá nhân
+        creds = ServiceAccountCredentials.from_json_keyfile_name("key.json", scope)
+    except Exception:
+        # 2. Nếu không tìm thấy key.json (tức là đang chạy trên mạng), thì dùng secrets
         creds_dict = dict(st.secrets["gcp_service_account"])
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    # KHI CHẠY DƯỚI MÁY TÍNH CỦA BẠN: Dùng file key.json như cũ
-    else:
-        creds = ServiceAccountCredentials.from_json_keyfile_name("key.json", scope)
         
     return gspread.authorize(creds).open("He_Thong_Thi_TOCFL")
 
