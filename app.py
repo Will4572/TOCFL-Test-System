@@ -326,7 +326,10 @@ def admin_page():
                 })
         
         if len(monitor_list) > 0:
-            st.dataframe(pd.DataFrame(monitor_list), use_container_width=True)
+            # Tạo DataFrame và đẩy STT (index) bắt đầu từ 1
+            df_monitor = pd.DataFrame(monitor_list)
+            df_monitor.index = df_monitor.index + 1
+            st.dataframe(df_monitor, use_container_width=True)
         else:
             st.info("目前沒有學生 (No students currently taking the exam).")
             
@@ -341,21 +344,23 @@ def admin_page():
             df_week = df[df.iloc[:, 1] == f"第 {conf[2]} 週"] 
             
             if not df_week.empty:
-                # TỰ ĐỘNG TÌM ĐÚNG CỘT CHỨA ĐIỂM SỐ
+                # Tự động dò tìm cột điểm
                 score_col_idx = 7 # Mặc định là cột thứ 8
                 for idx, col_name in enumerate(df.columns):
                     if '分' in str(col_name) or 'score' in str(col_name).lower():
                         score_col_idx = idx
                         break
                 
-                scores = pd.to_numeric(df_week.iloc[:, score_col_idx], errors='coerce').dropna()
+                # Giải quyết lỗi định dạng số phẩy của Google Sheets (vd: 16,7 -> 16.7)
+                raw_scores = df_week.iloc[:, score_col_idx].astype(str).str.replace(',', '.')
+                scores = pd.to_numeric(raw_scores, errors='coerce').dropna()
                 
                 if not scores.empty:
                     c1, c2, c3, c4 = st.columns(4)
                     c1.metric("已考次數 (Total Exams)", f"{len(scores)}")
                     c2.metric("平均分 (Average)", f"{scores.mean():.1f}")
-                    c3.metric("最高分 (Highest)", f"{scores.max()}")
-                    c4.metric("最低分 (Lowest)", f"{scores.min()}")
+                    c3.metric("最高分 (Highest)", f"{scores.max():.1f}")
+                    c4.metric("最低分 (Lowest)", f"{scores.min():.1f}")
                     
                     csv_data = df_week.to_csv(index=False).encode('utf-8-sig')
                     st.download_button(label="📥 下載成績單 (Download CSV)", data=csv_data, file_name=f"TOCFL_Results_Week_{conf[2]}.csv", mime="text/csv")
