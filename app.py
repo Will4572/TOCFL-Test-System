@@ -193,10 +193,8 @@ def connect_sheets():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     
     try:
-        # 1. Thử đọc file key.json khi bạn chạy dưới máy tính cá nhân
         creds = ServiceAccountCredentials.from_json_keyfile_name("key.json", scope)
     except Exception:
-        # 2. Nếu không tìm thấy key.json (tức là đang chạy trên mạng), thì dùng secrets
         creds_dict = dict(st.secrets["gcp_service_account"])
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         
@@ -230,27 +228,36 @@ if 'page' not in st.session_state: st.session_state.page = "Login"
 if 'answers' not in st.session_state: st.session_state.answers = {}
 if 'current_q' not in st.session_state: st.session_state.current_q = 0
 
+# --- HÀM ĐỒNG BỘ ĐÃ ĐƯỢC NÂNG CẤP ("TỰ CHỮA LÀNH") ---
 def auto_sync_progress():
     try:
         if 'student_info' not in st.session_state or 'exam_data' not in st.session_state: return
-        st_id = st.session_state.student_info['ID']
-        ws = sheet.worksheet("正在考試")
+        st_id = str(st.session_state.student_info['ID']).strip()
+        
+        # Tự động tạo trang tính "正在考試" nếu nó bị xóa mất hoặc không tồn tại
+        try:
+            ws = sheet.worksheet("正在考試")
+        except:
+            ws = sheet.add_worksheet(title="正在考試", rows="100", cols="5")
+            ws.append_row(["學號", "Data"])
+            
         data = ws.get_all_values()
         
         found_row = -1
         for i, r in enumerate(data):
-            if len(r) > 0 and r[0] == str(st_id):
+            if len(r) > 0 and str(r[0]).strip() == st_id:
                 found_row = i + 1; break
                 
         state_data = {"exam_data": st.session_state.exam_data, "answers": st.session_state.answers}
         state_json = json.dumps(state_data)
         
         if found_row != -1: 
-            # Dùng cú pháp chuẩn cũ để tương thích với mọi bản gspread
-            ws.update(f'B{found_row}', [[state_json]])
+            # Dùng update_cell (hàng, cột, giá trị) - Cú pháp này KHÔNG BAO GIỜ bị lỗi phiên bản
+            ws.update_cell(found_row, 2, state_json)
         else: 
             ws.append_row([st_id, state_json])
-    except: pass
+    except Exception as e: 
+        pass
 
 # ==========================================
 # 3. ADMIN DASHBOARD
@@ -280,8 +287,18 @@ def admin_page():
         
         if st.button("💾 儲存設定 (Save)", use_container_width=True):
             allowed_str = ",".join(allowed_classes)
-            # Khôi phục cú pháp chuẩn cũ
-            sheet.worksheet("設定").update('A2:F2', [[status, time_limit, week, conf[3], allowed_str, num_q]])
+            # Dùng update_cell để đảm bảo lưu cài đặt không bị lỗi
+            try:
+                sheet.worksheet("設定").update('A2:F2', [[status, time_limit, week, conf[3], allowed_str, num_q]])
+            except:
+                ws_set = sheet.worksheet("設定")
+                ws_set.update_cell(2, 1, status)
+                ws_set.update_cell(2, 2, time_limit)
+                ws_set.update_cell(2, 3, week)
+                ws_set.update_cell(2, 4, conf[3])
+                ws_set.update_cell(2, 5, allowed_str)
+                ws_set.update_cell(2, 6, num_q)
+                
             st.cache_data.clear()
             st.success("✅ 設定已更新！(Settings Updated)")
             time.sleep(1); st.rerun()
@@ -292,15 +309,13 @@ def admin_page():
         
         monitor_list = []
         for r in active_data:
-            # Kiểm tra dữ liệu: Phải có ít nhất 1 cột và không phải là dòng tiêu đề (chứa chữ 學號 hoặc ID)
             if len(r) > 0 and str(r[0]).strip() != "" and "學號" not in str(r[0]) and "ID" not in str(r[0]):
-                s_id = str(r[0])
-                s_info = next((sv for sv in sv_rows if str(sv[1]) == s_id), ["", s_id, "", "Unknown"])
+                s_id = str(r[0]).strip()
+                s_info = next((sv for sv in sv_rows if str(sv[1]).strip() == s_id), ["", s_id, "", "Unknown"])
                 
                 answered = 0
                 total_for_student = int(conf[5])
                 
-                # Giải mã dữ liệu quá trình làm bài
                 if len(r) > 1 and str(r[1]).strip() != "":
                     try:
                         state_dict = json.loads(r[1])
@@ -477,7 +492,6 @@ def finish_exam(sv, week):
     score = round(score, 1)
     if score.is_integer(): score = int(score)
 
-    # Lấy giờ quốc tế (UTC) và cộng thêm 8 tiếng để ra giờ Đài Loan
     tw_time = datetime.utcnow() + timedelta(hours=8)
 
     sheet.worksheet("考試結果").append_row([
@@ -536,7 +550,7 @@ if st.session_state.page == "Login":
                             is_resumed = False
                             temp_data = fetch_dynamic_data("正在考試")
                             for r in temp_data:
-                                if r and len(r) > 0 and r[0] == str(sv['ID']):
+                                if r and len(r) > 0 and str(r[0]).strip() == str(sv['ID']).strip():
                                     try:
                                         state_dict = json.loads(r[1])
                                         st.session_state.exam_data = state_dict.get("exam_data", [])
@@ -551,9 +565,7 @@ if st.session_state.page == "Login":
                                 num_q = int(conf[5])
                                 st.session_state.exam_data = random.sample(all_q, min(num_q, len(all_q)))
                             
-                            # Cập nhật danh sách "Đang thi" ngay khi vừa đăng nhập thành công
                             auto_sync_progress()
-                                
                             time.sleep(1)
                             st.session_state.page = "Exam"
                             st.rerun()
@@ -562,21 +574,16 @@ if st.session_state.page == "Login":
 
         st.markdown("<br><br>", unsafe_allow_html=True)
         with st.expander("🔐 系統管理員 (Admin Login)"):
-            # max_chars=10 giúp khóa ô nhập liệu, không cho gõ quá 10 ký tự
             pw = st.text_input("密碼 (Password)", type="password", max_chars=10)
-            
-            # Kiểm tra: Chỉ khi nào nhập ĐỦ 10 ký tự mới hiển thị nút bấm
             if len(pw) == 10:
                 if st.button("進入後台 (Enter Dashboard)", use_container_width=True): 
                     conf = get_exam_config()
-                    # Khi bấm nút mới bắt đầu kiểm tra mật khẩu với Google Sheet
                     if len(conf) > 1 and pw == str(conf[3]):
                         st.session_state.page = "Admin"
                         st.rerun()
                     else:
                         st.error("❌ 密碼錯誤 (Sai mật khẩu, vui lòng thử lại!)")
             elif len(pw) > 0:
-                # Báo hiệu cho admin biết họ đã nhập bao nhiêu số
                 st.info(f"Đang nhập... ({len(pw)}/10)")
 
 elif st.session_state.page == "Result":
