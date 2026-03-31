@@ -460,8 +460,11 @@ def finish_exam(sv, week):
     score = round(score, 1)
     if score.is_integer(): score = int(score)
 
+    # Lấy giờ quốc tế (UTC) và cộng thêm 8 tiếng để ra giờ Đài Loan
+    tw_time = datetime.utcnow() + timedelta(hours=8)
+
     sheet.worksheet("考試結果").append_row([
-        datetime.now().strftime("%Y-%m-%d %H:%M"), f"第 {week} 週", sv['Lop'], sv['ID'], 
+        tw_time.strftime("%Y-%m-%d %H:%M"), f"第 {week} 週", sv['Lop'], sv['ID'], 
         sv['CN'], sv['EN'], sv['QuocTich'], score
     ]) 
     
