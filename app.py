@@ -186,18 +186,16 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. GOOGLE SHEETS & CACHING
+# 2. GOOGLE SHEETS & CACHING (TỐI ƯU KẾT NỐI)
 # ==========================================
 @st.cache_resource
 def connect_sheets():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    
     try:
         creds = ServiceAccountCredentials.from_json_keyfile_name("key.json", scope)
     except Exception:
         creds_dict = dict(st.secrets["gcp_service_account"])
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        
     return gspread.authorize(creds).open("He_Thong_Thi_TOCFL")
 
 try: 
@@ -208,12 +206,18 @@ except Exception as e:
 
 @st.cache_data(ttl=60)
 def fetch_sheet_data(ws_name):
-    try: return sheet.worksheet(ws_name).get_all_values()
-    except: return []
+    # Có cơ chế chống sập (Retry) cho Cache
+    for attempt in range(3):
+        try: return sheet.worksheet(ws_name).get_all_values()
+        except Exception: time.sleep(random.uniform(0.5, 1.5))
+    return []
 
 def fetch_dynamic_data(ws_name):
-    try: return sheet.worksheet(ws_name).get_all_values()
-    except: return []
+    # Cơ chế chống nghẽn mạng cho Admin
+    for attempt in range(3):
+        try: return sheet.worksheet(ws_name).get_all_values()
+        except Exception: time.sleep(random.uniform(0.5, 1.5))
+    return []
 
 def get_exam_config():
     rows = fetch_sheet_data("設定")
@@ -228,33 +232,36 @@ if 'page' not in st.session_state: st.session_state.page = "Login"
 if 'answers' not in st.session_state: st.session_state.answers = {}
 if 'current_q' not in st.session_state: st.session_state.current_q = 0
 
+# --- TỐI ƯU CỰC MẠNH: ĐỒNG BỘ TIẾN ĐỘ CHỊU TẢI 100+ HỌC SINH ---
 def auto_sync_progress():
     try:
         if 'student_info' not in st.session_state or 'exam_data' not in st.session_state: return
         st_id = str(st.session_state.student_info['ID']).strip()
         
-        try:
-            ws = sheet.worksheet("正在考試")
-        except:
-            ws = sheet.add_worksheet(title="正在考試", rows="100", cols="5")
-            ws.append_row(["學號", "Data"])
-            
-        data = ws.get_all_values()
-        
-        found_row = -1
-        for i, r in enumerate(data):
-            if len(r) > 0 and str(r[0]).strip() == st_id:
-                found_row = i + 1; break
-                
         state_data = {"exam_data": st.session_state.exam_data, "answers": st.session_state.answers}
         state_json = json.dumps(state_data)
         
-        if found_row != -1: 
-            ws.update_cell(found_row, 2, state_json)
-        else: 
-            ws.append_row([st_id, state_json])
-    except Exception as e: 
-        pass
+        # Vòng lặp bảo vệ: Thử tối đa 3 lần nếu mạng bị nghẽn do 100+ hs cùng bấm
+        for attempt in range(3):
+            try:
+                try: ws = sheet.worksheet("正在考試")
+                except gspread.exceptions.WorksheetNotFound:
+                    ws = sheet.add_worksheet(title="正在考試", rows="100", cols="5")
+                    ws.append_row(["學號", "Data"])
+                
+                # BĂNG THÔNG SIÊU NHANH: Thay vì tải cả bảng, chỉ yêu cầu Google tìm đúng 1 ô
+                try:
+                    cell = ws.find(st_id, in_column=1)
+                    ws.update_cell(cell.row, 2, state_json)
+                except gspread.exceptions.CellNotFound:
+                    ws.append_row([st_id, state_json])
+                
+                break # Nếu thao tác thành công thì thoát vòng lặp ngay
+            except Exception as e:
+                # Nếu API quá tải (Lỗi 429), bắt hệ thống ngủ ngẫu nhiên 0.5 đến 2 giây rồi thử lại
+                if attempt < 2: time.sleep(random.uniform(0.5, 2.0))
+                else: pass
+    except Exception: pass
 
 # ==========================================
 # 3. ADMIN DASHBOARD
@@ -284,16 +291,19 @@ def admin_page():
         
         if st.button("💾 儲存設定 (Save)", use_container_width=True):
             allowed_str = ",".join(allowed_classes)
-            try:
-                sheet.worksheet("設定").update('A2:F2', [[status, time_limit, week, conf[3], allowed_str, num_q]])
-            except:
-                ws_set = sheet.worksheet("設定")
-                ws_set.update_cell(2, 1, status)
-                ws_set.update_cell(2, 2, time_limit)
-                ws_set.update_cell(2, 3, week)
-                ws_set.update_cell(2, 4, conf[3])
-                ws_set.update_cell(2, 5, allowed_str)
-                ws_set.update_cell(2, 6, num_q)
+            for attempt in range(3):
+                try:
+                    try: sheet.worksheet("設定").update('A2:F2', [[status, time_limit, week, conf[3], allowed_str, num_q]])
+                    except:
+                        ws_set = sheet.worksheet("設定")
+                        ws_set.update_cell(2, 1, status)
+                        ws_set.update_cell(2, 2, time_limit)
+                        ws_set.update_cell(2, 3, week)
+                        ws_set.update_cell(2, 4, conf[3])
+                        ws_set.update_cell(2, 5, allowed_str)
+                        ws_set.update_cell(2, 6, num_q)
+                    break
+                except Exception: time.sleep(random.uniform(0.5, 1.5))
                 
             st.cache_data.clear()
             st.success("✅ 設定已更新！(Settings Updated)")
@@ -326,7 +336,6 @@ def admin_page():
                 })
         
         if len(monitor_list) > 0:
-            # Tạo DataFrame và đẩy STT (index) bắt đầu từ 1
             df_monitor = pd.DataFrame(monitor_list)
             df_monitor.index = df_monitor.index + 1
             st.dataframe(df_monitor, use_container_width=True)
@@ -344,14 +353,12 @@ def admin_page():
             df_week = df[df.iloc[:, 1] == f"第 {conf[2]} 週"] 
             
             if not df_week.empty:
-                # Tự động dò tìm cột điểm
-                score_col_idx = 7 # Mặc định là cột thứ 8
+                score_col_idx = 7 
                 for idx, col_name in enumerate(df.columns):
                     if '分' in str(col_name) or 'score' in str(col_name).lower():
                         score_col_idx = idx
                         break
                 
-                # Giải quyết lỗi định dạng số phẩy của Google Sheets (vd: 16,7 -> 16.7)
                 raw_scores = df_week.iloc[:, score_col_idx].astype(str).str.replace(',', '.')
                 scores = pd.to_numeric(raw_scores, errors='coerce').dropna()
                 
@@ -471,6 +478,7 @@ def exam_page():
                 st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
+# --- TỐI ƯU CƠ CHẾ NỘP BÀI (CHỐNG NGHẼN KHI NHIỀU HS NỘP CÙNG LÚC) ---
 def finish_exam(sv, week):
     auto_sync_progress()
     total_q = len(st.session_state.exam_data)
@@ -506,19 +514,27 @@ def finish_exam(sv, week):
 
     tw_time = datetime.utcnow() + timedelta(hours=8)
 
-    sheet.worksheet("考試結果").append_row([
-        tw_time.strftime("%Y-%m-%d %H:%M"), f"第 {week} 週", sv['Lop'], sv['ID'], 
-        sv['CN'], sv['EN'], sv['QuocTich'], score
-    ]) 
-    
-    try:
-        ws_temp = sheet.worksheet("正在考試")
-        cell = ws_temp.find(str(sv['ID']))
+    # Vòng lặp bảo vệ lệnh nộp bài cuối cùng (Quan trọng nhất)
+    for attempt in range(3):
         try:
-            ws_temp.delete_rows(cell.row)
-        except:
-            ws_temp.delete_row(cell.row)
-    except: pass
+            sheet.worksheet("考試結果").append_row([
+                tw_time.strftime("%Y-%m-%d %H:%M"), f"第 {week} 週", sv['Lop'], sv['ID'], 
+                sv['CN'], sv['EN'], sv['QuocTich'], score
+            ]) 
+            break
+        except Exception:
+            time.sleep(random.uniform(1.0, 3.0))
+
+    # Xóa tên học sinh khỏi danh sách "Đang thi"
+    for attempt in range(3):
+        try:
+            ws_temp = sheet.worksheet("正在考試")
+            cell = ws_temp.find(str(sv['ID']), in_column=1)
+            try: ws_temp.delete_rows(cell.row)
+            except: ws_temp.delete_row(cell.row)
+            break
+        except gspread.exceptions.CellNotFound: break # Nếu đã bị xóa hoặc không thấy thì bỏ qua
+        except Exception: time.sleep(random.uniform(0.5, 1.5))
     
     st.session_state.final_score = score
     st.session_state.final_logs = logs
