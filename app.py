@@ -206,14 +206,12 @@ except Exception as e:
 
 @st.cache_data(ttl=60)
 def fetch_sheet_data(ws_name):
-    # Có cơ chế chống sập (Retry) cho Cache
     for attempt in range(3):
         try: return sheet.worksheet(ws_name).get_all_values()
         except Exception: time.sleep(random.uniform(0.5, 1.5))
     return []
 
 def fetch_dynamic_data(ws_name):
-    # Cơ chế chống nghẽn mạng cho Admin
     for attempt in range(3):
         try: return sheet.worksheet(ws_name).get_all_values()
         except Exception: time.sleep(random.uniform(0.5, 1.5))
@@ -241,26 +239,26 @@ def auto_sync_progress():
         state_data = {"exam_data": st.session_state.exam_data, "answers": st.session_state.answers}
         state_json = json.dumps(state_data)
         
-        # Vòng lặp bảo vệ: Thử tối đa 3 lần nếu mạng bị nghẽn do 100+ hs cùng bấm
         for attempt in range(3):
             try:
-                try: ws = sheet.worksheet("正在考試")
-                except gspread.exceptions.WorksheetNotFound:
+                try: 
+                    ws = sheet.worksheet("正在考試")
+                except Exception:
                     ws = sheet.add_worksheet(title="正在考試", rows="100", cols="5")
                     ws.append_row(["學號", "Data"])
                 
-                # BĂNG THÔNG SIÊU NHANH: Thay vì tải cả bảng, chỉ yêu cầu Google tìm đúng 1 ô
                 try:
                     cell = ws.find(st_id, in_column=1)
-                    ws.update_cell(cell.row, 2, state_json)
-                except gspread.exceptions.CellNotFound:
+                    if cell:
+                        ws.update_cell(cell.row, 2, state_json)
+                    else:
+                        ws.append_row([st_id, state_json])
+                except Exception:
                     ws.append_row([st_id, state_json])
                 
-                break # Nếu thao tác thành công thì thoát vòng lặp ngay
+                break 
             except Exception as e:
-                # Nếu API quá tải (Lỗi 429), bắt hệ thống ngủ ngẫu nhiên 0.5 đến 2 giây rồi thử lại
                 if attempt < 2: time.sleep(random.uniform(0.5, 2.0))
-                else: pass
     except Exception: pass
 
 # ==========================================
@@ -529,12 +527,16 @@ def finish_exam(sv, week):
     for attempt in range(3):
         try:
             ws_temp = sheet.worksheet("正在考試")
-            cell = ws_temp.find(str(sv['ID']), in_column=1)
-            try: ws_temp.delete_rows(cell.row)
-            except: ws_temp.delete_row(cell.row)
+            try:
+                cell = ws_temp.find(str(sv['ID']), in_column=1)
+                if cell:
+                    try: ws_temp.delete_rows(cell.row)
+                    except: ws_temp.delete_row(cell.row)
+            except Exception:
+                pass # Không tìm thấy thì bỏ qua, coi như đã xóa
             break
-        except gspread.exceptions.CellNotFound: break # Nếu đã bị xóa hoặc không thấy thì bỏ qua
-        except Exception: time.sleep(random.uniform(0.5, 1.5))
+        except Exception: 
+            time.sleep(random.uniform(0.5, 1.5))
     
     st.session_state.final_score = score
     st.session_state.final_logs = logs
